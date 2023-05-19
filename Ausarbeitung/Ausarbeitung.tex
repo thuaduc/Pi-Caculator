@@ -1,0 +1,56 @@
+% Diese Zeile bitte -nicht- aendern.
+\documentclass[course=erap]{aspdoc}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% done: Ersetzen Sie in den folgenden Zeilen die entsprechenden -Texte-
+%% mit den richtigen Werten.
+\newcommand{\theGroup}{108} % Beispiel: 42
+\newcommand{\theNumber}{A329} % Beispiel: A123
+\author{Cara Dickmann \and Thua Duc Nguyen \and Eslam Nasrallah}
+\date{Wintersemester 2022/23} % Beispiel: Wintersemester 2019/20
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Diese Zeile bitte -nicht- aendern.
+\title{Gruppe \theGroup{} -- Abgabe zu Aufgabe \theNumber}
+
+\begin{document}
+\maketitle
+
+\section{Einleitung}
+
+
+\section{Lösungsansatz}
+
+\subsection{Beweis der Polynomdarstellung}
+\begin{align*}
+    \pi &= 2 + \sum_{n=1}^{\infty} {\frac{n!^2 \cdot 2^{n+1} }{(2n+1)!}} 
+    = \sum_{n=0}^{\infty} {\frac{n!^2 \cdot 2^{n+1} }{(2n+1)!}} 
+    = \sum_{n=0}^{\infty} {\frac{2}{1} \cdot \frac{n!^2 \cdot 2^n}{(2n+1)!}} \\
+    &= \sum_{n=0}^{\infty} {\frac{2}{1} \cdot \frac{(2 \cdot 1^2) \cdots (2 n^2)}{1 \cdots (2n+1)}}
+    = \sum_{n=0}^{\infty} {\frac{2}{1} \cdot \prod_{k=1}^{n} {\frac{2k^2}{2k \cdot (2k+1)}}} \\
+    &= \sum_{n=0}^{\infty} {\frac{2}{1} \cdot \prod_{k=1}^{n} {\frac{k}{2k+1}}}
+    = \sum_{n=0}^{\infty} {\frac{a(n)}{b(n)} \cdot \prod_{k=1}^{n} {\frac{p(k)}{q(k)}}} \\
+\label{eq:first}
+\end{align*}
+
+
+
+
+
+
+% TODO: Je nach Aufgabenstellung einen der Begriffe wählen
+\section{Korrektheit/Genauigkeit}
+
+
+\section{Performanzanalyse}
+
+
+\section{Zusammenfassung und Ausblick}
+
+% TODO: Fuegen Sie Ihre Quellen der Datei Ausarbeitung.bib hinzu
+% Referenzieren Sie diese dann mit \cite{}.
+% Beispiel: CR2 ist ein Register der x86-Architektur~\cite{intel2017man}.
+\bibliographystyle{plain}
+\bibliography{Ausarbeitung}{}
+
+\end{document}
