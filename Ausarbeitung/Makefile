@@ -1,4 +1,3 @@
-
 .PHONY: all Ausarbeitung.pdf clean
 all: Ausarbeitung.pdf
 Ausarbeitung.pdf:

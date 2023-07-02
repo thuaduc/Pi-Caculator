@@ -1,5 +1,15 @@
 % Diese Zeile bitte -nicht- aendern.
 \documentclass[course=erap]{aspdoc}
+\usepackage{wrapfig}
+\usepackage{graphicx}
+\usepackage{blindtext}
+\usepackage{listings}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{pgfplots}
+\usepackage{float}
+\usepackage{tikz}
+\pgfplotsset{compat = newest}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% done: Ersetzen Sie in den folgenden Zeilen die entsprechenden -Texte-
@@ -17,37 +27,343 @@
 \maketitle
 
 \section{Einleitung}
+Pi ($\pi$) ist die mathematische Konstante, deren Wert das Verhältnis zwischen Umfang und Durchmesser eines Kreises wiedergibt.
+
+Während es bei einfachen geometrischen Berechnungen oft ausreicht, mit dem Näherungswert von $\pi$, wie 3.14, zu rechnen, gibt es auch Gebiete, in denen ein hohes Maß an Präzision erforderlich ist.
+So ist es beispielsweise im Bereich der Computergrafik von Vorteil, mit einem sehr genauen Wert von $\pi$ zu rechnen, um Bilder und Animationen von runden Formen möglichst realistisch zu gestalten.
+Auch in der Kryptographie nutzt man $\pi$ mit möglichst vielen Nachkommastellen, um damit Zufallszahlen zu erzeugen. %todo: Quellen
+\\\\
+Es gibt viele andere Anwendungsbereiche, in denen ein möglichst exaktes $\pi$ verlangt ist. Da $\pi$ jedoch eine irrationale Zahl ist, besitzt es eine unendliche Anzahl von nichtperiodischen Dezimalstellen und lässt sich nicht ohne weiteres berechnen.
+Im Laufe der Zeit wurden allerdings diverse Methoden entwickelt, um sich $\pi$ zu approximieren.
+
+Dazu gehört die in diesem Projekt angegebene Formel ~\ref{eq:pi_formula}, welche für $n = \inf$ den genauen Wert von $\pi$ ergäbe.
+\begin{equation}\label{eq:pi_formula}
+2 + \sum_{k=1}^{n} {\frac{k!^2 \cdot 2^{k+1} }{(2k+1)!}}
+\end{equation}
+
+Da es natürlich nicht wirklich mit $n = \inf$ gerechnet werden kann, wird mit einer reellen Zahl für n auf die gewünschte Anzahl von Nachkommastellen gerundet.
+Um die Berechnung so effizient wie möglich zu gestalten, wird für die Berechnung des Terms (~\ref{eq:pi_formula}) Binary Splitting angewendet.
+Zur effektiveren Durchführung der hierbei erforderlichen Multiplikationen wird, entsprechend der Aufgabenstellung, die Karazuba-Multiplikation verwendet.
 
 
 \section{Lösungsansatz}
+\subsection{Darstellung großer Zahlen}
+\subsubsection{Bignum Konstruktion}
+Um Pi mit einer beliebig hohen Präzision zu berechnen, wird eine Datenstruktur mit unlimitierter Anzahl an Nachkommastellen benötigt. Da dies bei den standardmäßigen Datentypen nicht vorgesehen ist, wurde eine dafür geeignete Struktur, namens „Bignum“ erstellt.
 
-\subsection{Beweis der Polynomdarstellung}
-\begin{align*}
-    \pi &= 2 + \sum_{n=1}^{\infty} {\frac{n!^2 \cdot 2^{n+1} }{(2n+1)!}} 
-    = \sum_{n=0}^{\infty} {\frac{n!^2 \cdot 2^{n+1} }{(2n+1)!}} 
-    = \sum_{n=0}^{\infty} {\frac{2}{1} \cdot \frac{n!^2 \cdot 2^n}{(2n+1)!}} \\
-    &= \sum_{n=0}^{\infty} {\frac{2}{1} \cdot \frac{(2 \cdot 1^2) \cdots (2 n^2)}{1 \cdots (2n+1)}}
-    = \sum_{n=0}^{\infty} {\frac{2}{1} \cdot \prod_{k=1}^{n} {\frac{2k^2}{2k \cdot (2k+1)}}} \\
-    &= \sum_{n=0}^{\infty} {\frac{2}{1} \cdot \prod_{k=1}^{n} {\frac{k}{2k+1}}}
-    = \sum_{n=0}^{\infty} {\frac{a(n)}{b(n)} \cdot \prod_{k=1}^{n} {\frac{p(k)}{q(k)}}} \\
-\label{eq:first}
-\end{align*}
+Ein Bignum Objekt besitzt ein Array mit Datenblöcken, welche die Ziffern eines unsigned Integer zur Basis 32 Bit repräsentieren. Zudem enthält ein Objekt vom Typ bignum ein Attribut, dass die Gesamtlänge der Zahl enthält, sowie eines, das die Anzahl an Nachkommastellen angibt.
+Obwohl bei einer größeren Basis, wie 64 Bit weniger Rechenoperationen nötig wären, wird als Basis 32 Bit gewählt, damit sich bei der Multiplikation zweier Zahlen keine Probleme ergeben. %% todo: satz verbessern
+
+Die Zahlen werden in Little-Endian gespeichert, da die Mehrheit der arithmetischen Operationen aufgrund des Übertrags mit der niederwertigsten Ziffer starten. Daher befindet sich der Block mit der kleinsten Stellenwertigkeit am Anfang des Datenarrays.
+
+Da für die Berechnung von Pi keine negativen Zahlen benötigt werden, sind ist Bignum Struktur unsigned.
+
+\subsubsection{Darstellung von Nachkommastellen}
+Zur Darstellung der Nachkommastellen wird eine Bignum als Festkommazahl interpretiert.
+
+Die Verwendung von Fließkommazahlen nach IEEE-754 ist nicht geeignet, da diese Darstellung nur eine begrenzte Anzahl von Bits zur Darstellung des Exponenten und der Signifikanten bietet. Dadurch verliert diese Art der Zahlendarstellung zu sehr an Genauigkeit, wenn mit großen Zahlen gerechnet wird. Rundungsfehler können auch auftreten, wenn mit einer solchen Darstellung Rechenoperationen auf Zahlen mit unterschiedlicher Genauigkeit durchgeführt werden.\newline
+
+Um den Rechenaufwand in der Implementierung zu minimieren und weniger Speicher zu verbrauchen, wird auf die Darstellung von Nachkommastellen, die nicht signifikant sind, also Nullen die am Ende der Zahl stehen, verzichtet. 
+
+\subsection{Arithmetik}
+In diesem Projekt ist sowohl Ganzzahlarithmetik als auch das Rechnen mit Nachkommastellen notwendig.
+Durch die Konstruktion des Structs „Bignum“ ist es nicht kompliziert Addition oder Subtraktion durchzuführen. Multiplikation und Division erfordern jedoch fortgeschrittenere Verfahren, die Zahlen mit beliebiger Genauigkeit effizient miteinander verrechnen können. Nach den Anforderungen der Aufgabenstellung wird für das Bestimmen von Produkten die Karazuba-Multiplikation verwendet. Um Quotienten zu berechnen, wird das Newton-Raphson-Division Verfahren angewendet. 
+
+\subsubsection{Addition/Subtraktion}
+Bei der Addition bzw. Subtraktion zweier Zahlen, es ist wichtig sicherzustellen, dass nur Blöcke mit der gleichen Signifikanz addiert/subtrahiert werden. Falls bei der Addition, eine Zahl mehr Nachkommastellen hat, kann deren Wert an den zugehörigen Blöcken einfach übertragen werden. 
+
+Die Subtraktion unterscheidet sich nicht sehr von der Addition. Allerdings muss beachtet werden, ob der Subtrahend größer als der Minuend ist. In diesem Fall werden die beiden Zahlen zuerst vertauscht. Dann kann eine vorzeichenlose Subtraktion ausgeführt werden. 
+Dabei muss beachtet werden, ob der Minuend oder der Subtrahend einen längeren Nachkommateil hat. Hat der Minuend einen Überschuss an Nachkommastellen, können diese ebenfalls unverändert übertragen werden. Ist der Nachkommaanteil des Subtrahenden länger, muss der beim Minuend von höherwertigen Ziffern "geliehen" werden. 
+
+
+\subsubsection{Multiplikation}
+Bei der Multiplikation ist die Anzahl der Nachkommastellen immer gleich der Summe der Nachkommastellen der Faktoren und die Position des Kommas kann Einfluss auf die eigentlichen Werte der Ziffern, kann also während der Rechnung vernachlässigt werden.
+Um die Laufzeit einer naiven Multiplikation zu reduzieren, wurde der Karazuba-Algorithmus verwendet. Dadurch kann die Multiplikation von der Laufzeitklasse $\Theta(n^2)$ auf $O(n^{1.59})$ reduziert werden.\newline
+
+Hierfür werden die Faktoren in 4 gleiche Teile zerlegt.
+Ein Faktor $x$ wird als $x = x_0 + b^m \cdot x_1$ betrachtet, wobei $m = \lceil \frac{n}{2} \rceil$, mit $n$ die maximale Länge der beiden Faktoren ist und $b =(2^{32})$. Also enthält $x_1$ die obere Hälfte und $x_0$ die untere Hälfte der Blöcke. Damit alle Teile die gleiche Länge haben, wird wenn nötig Null-Padding an die höherwertigen Bits gesetzt hinzugefügt.
+
+Anschließend wird das Produkt mit der Karazuba-Formel (~\ref{eq:Karazuba}) berechnet.
+\begin{equation}\label{eq:Karazuba}
+x \cdot y = x_0 y_0 +  b^2 \cdot x_1y_1 + b \cdot((x_0 + x_1)(y_0+y_1)- x_0y_0 - x_0y_0)
+\end{equation}  
+
+Die Multiplikation mit $b$ bzw. $b^2$ kann jeweils durch einen Shift um einen bzw. zwei Blöcke nach links ersetzt werden.\newline
+Auf die Multiplikationen zwischen den Faktorteilen wird rekursiv wieder der Karazuba-Algorithmus angewendet, bis die Blocklänge eins erreicht ist, bei der dann normal multipliziert wird.
+
+Dieser Algorithmus ließe sich durch Parallelisierung der Berechnung der einzelnen Faktoren beschleunigen, jedoch ist hier kein SIMD anwendbar.
+
+\subsubsection{Newton-Raphson Division}
+
+Divisionsalgorithmen lassen sich je nach Iterationsoperator hauptsächlich in zwei Klassen einteilen. Die erste Klasse verwendet die Subtraktion als iterativen Operator. 
+Diese Methode erzeugt nur eine Ziffer pro Iteration und ist daher ziemlich zeitaufwändig. Die zweite Klasse, auch 
+bekannt als Fast Division, verwendet die Multiplikation als iterativen Operator. Diese Algorithmen sind so konzipiert, 
+dass sie praktisch und effizient sind und sich daher für eine Vielzahl von Anwendungen in der Computerarithmetik, 
+der numerischen Analyse und dem wissenschaftlichen Rechnen eignen. Aus diesem Grund benutzen wir in diesem Projekt die
+Newton-Raphson Division, welche ein Fast Divisionsalgorithmus ist~\cite{divisionclass}.
+
+Die Newton-Raphson Division verwendet die Newton-Methode, um den Kehrwert des Zählers zu ermitteln und diesen Kehrwert mit dem 
+Nenner zu multiplizieren. Das Ergebnis davon ist der gesuchten Quotient. Der Algorithmus ist in die vier folgenden Schritte aufzugliedern.
+
+\begin{itemize}
+    \item Normalisierung: Zähler $Z$ und Nenner $N$ werden zwischen 0,5 und 1 normalisiert.
+    Dieser Schritt wird so durchgeführt, dass $N$ nach recht geschifft wird, bis $N < 1$ gilt. Dies ist wichtig 
+    für die numerische Stabilität der Konvergenzrate des Bereichs der darstellbaren Zahlen 
+    und der Genauigkeit der Newton-Raphson Division. 
+    
+    \item Initialisierung: Eine Konstante $X_0$ wird mithilfe von linearer Approximation in dem Form     
+    \begin{equation*}
+        \frac{48}{17}- \frac{32}{17} \cdot N'
+    \end{equation*} 
+    berechnet, wobei $N'$ die skalierte Version von $N$ ist~\cite{linear-approximation}. 
+    Die Konstante $X$ ist eine Annäherung an den Kehrwert von $N'$.
+    
+    \item Iteration: Der Algorithmus führt eine Schleife durch, die 
+    \begin{equation*}
+        \left\lceil \frac{\log_{2}{(P+1)}}{\log_{2}17} \right\rceil
+    \end{equation*}
+    Runden durchläuft. $P$ ist hierbei die Genauigkeit, also die Anzahl an Binärstellen des Ergebnisses. Diese Anzahl von Iterationen kann auf der Grundlage des festen Werts von P im Voraus berechnet werden.\\
+    Innerhalb der Schleife wird $X$ durch mit  
+    \begin{equation*}
+        X_{n+1} = X_n \cdot (2 - N' \cdot X_n)~\cite{linear-approximation}
+    \end{equation*}
+     aktualisiert, um die Annäherung an den Kehrwert zu 
+    verbessern.
+    
+   \item Multiplikation: Die Multiplikation von $Z'$ und $X$ ergibt das Ergebnis mit gewünschten P Binärstellen.
+\end{itemize}
 
 
 
 
+\subsection{Binary Splitting}
+Eine Methode zur schnelleren Auswertung von Reihen rationaler Terme ist das Binary Splitting.\\ 
+Ein Grund für die Beschleunigung der Berechnung ist, dass Binary Splitting die Größe der entstehenden Teilprodukte reduziert. Außerdem ist beim binary Splitting nicht für jeden Term einer Reihe eine Division erforderlich, sondern nur abschließend eine einzige Division mit der gewünschten Genauigkeit.\\
+Obendrein hat Binary Splitting eine geringere Komplexität als eine naive Berechnung einer Reihe.\\
+Angenommen $M(n)$ sei die Komplexität der Multiplikation von zwei N-Bit-Zahlen. 
+Die Komplexität der vom Binary Splitting verwendeten Berechnung (~\ref{eq:binary_split}) ist dann
+$O((\log N)^2 M(N))$ ~\cite{splitspeed}, was im Vergleich zur Komplexität der ursprünglichen 
+Berechnung (\ref{eq:pi_formula}) $O(NM(N))$ sehr viel schneller ist.
+%https://arxiv.org/pdf/1912.05319.pdf#:~:text=Note%20also%20that%20the%20binary,(n)%20log2%20n).
+\\
+
+Es folgt die Kernformel des Binary Splitting. Hierfür sei $S_{n_1, n_2}$ für $n_1, n_2 \in N$ mit $n_1 < n_2$ eine Folge der folgenden Form und seien $a(n), b(n), p(n)$ und $q(n)$ Polynome mit ganzzahligen Koeffizienten:
+\begin{equation}
+    S_{n1,n2} = \sum_{n=n1}^{n2 - 1} {\frac{a(n)}{b(n)} \cdot \prod_{k=n1}^{n} {\frac{p(k)}{q(k)}}} = \frac{T_{n1,n2}}{B_{n1,n2}Q_{n1,n2}}
+    \label{eq:binary_split} 
+\end{equation} 
 
 
-% TODO: Je nach Aufgabenstellung einen der Begriffe wählen
-\section{Korrektheit/Genauigkeit}
+\subsubsection{Beweis der Polynomdarstellung}
+Damit die mathematische Konstante $\pi$ effizient mittels Binary Splitting berechnet werden kann, muss aber zuerst die in der Aufgabenstellung gegebene Formel (~\ref{eq:pi_formula}) umformuliert werden, um die für das binary Splitting verwendeten Polynome zu bestimmen.
+
+
+\begin{align}
+    \pi &= 2 + \sum_{n=1}^{\infty} {\frac{n!^2 \cdot 2^{n+1} }{(2n+1)!}} \nonumber\\ 
+    &= 2 + \sum_{n=1}^{\infty} {\frac{2}{1} \cdot \frac{n!^2 \cdot 2^n}{(2n+1)!}}
+    = 2 + \sum_{n=1}^{\infty} {\frac{2}{1} \cdot \frac{(2 \cdot 1^2) \cdots (2 n^2)}{1 \cdots (2n+1)}}\nonumber\\
+    &= 2 + \sum_{n=1}^{\infty} {\frac{2}{1} \cdot \prod_{k=1}^{n} {\frac{2k^2}{2k \cdot (2k+1)}}} 
+    = 2 + \sum_{n=1}^{\infty} {\frac{2}{1} \cdot \prod_{k=1}^{n} {\frac{k}{2k+1}}}\nonumber\\
+    &= 2 + \sum_{n=1}^{\infty} {\frac{a(n)}{b(n)} \cdot \prod_{k=1}^{n} {\frac{p(k)}{q(k)}}}\label{eq:main_poly} 
+\end{align}
+Dies beweist, dass Pi durch die folgenden Polynome, in die Formel des Binary Splittings passt, wie es in der Aufgabenstellung angegeben ist.
+\begin{center}
+	\framebox{$a(n) = 2$,\; $b(n) = 1$,\; $p(k) = n$,\; $q(k) = 2n + 1$}
+\end{center}
+
+
+
+\subsubsection{Die Hauptformel}
+Aus (~\ref{eq:pi_formula}) und (~\ref{eq:main_poly}) können wir $\pi$ wie folgt formulieren:
+\begin{equation*}
+    \pi = 2 + \frac{T(1, n)}{B(1, n)Q(1, n)} 
+\end{equation*}
+Da $b(n)$ konstant den Wert 1 hat, gilt auch $B(1, n) = 1  \; \; \forall n \in [1,\infty[$. Deswegen lässt sich $\pi$ wie folgt berechnen:
+\begin{equation*}
+    \pi = 2 + \frac{T(1, n)}{Q(1, n)} 
+\end{equation*} 
+
+
+\subsection{Vergleichsimplementierung}
+\subsubsection{Hex Implementierung}
+Unsere zweite Version leitet sich vom "Bailey-Borwein-Plouffe BBP"-Algorithmus ab. Die BBP-Formel berechnet die n-te Ziffer zur Basis 16 (hexadezimal) von $\pi$. Die BBP-Formel zur Berechnung von $\pi$ lautet:
+
+\begin{equation*}
+    \pi = \sum_{i=0}^{\infty} {\frac{1}{16^{i}} \left( \frac{4}{8i+1} - \frac{2}{8i+4} - \frac{1}{8i+5} - \frac{1}{8i+6} \right)}
+\end{equation*}
+Um der Hexadezimalziffern von $\pi$  beginnend nach den ersten d Hex Ziffern zu berechnen, kann die Formel folgendermaßen umgeschrieben werden ~\cite{BBPAlg}: 
+
+\begin{equation*}
+    \{16^{d}\pi\} = \{ 4\{16^{d}S_1\} - 2\{16^{d}S_4\} - \{16^{d}S_5\} - \{16^{d}S_6\} \} 
+\end{equation*}
+mit
+\begin{equation*}
+    16^{d} S_{j} = 16^{d} \sum_{k=0}^{\infty} {\frac{1}{16^{d} (8k + j)}} = {\sum_{k=0}^{d} {\frac{16^{d-k} \mod {8k + j}} {8k + j} + \sum_{k= d+1}^{\infty} {\frac {16^{d-k}} {8k + j} } } } 
+\end{equation*}
+Um alle Ziffern von Pi bis zur Zahl n zu berechnen, wird die Formel für jede Zahl bis n angewendet. Die Komplexität
+dieser Formel ist $O((N\log N)M(\log N))$.~\cite{TimeBBP}
+
+\subsubsection{Dezimal Implementierung}
+Diese Implementierung kann direkt aus der Leibniz-Reihe abgeleitet werden.
+\begin{equation*}
+    \pi = 2 + \frac{1}{3} (2 + \frac{2}{5} (2 + \frac{3}{7} (2 + \frac{4}{9} (2 + \frac{5}{11} (2 + \frac{6}{13} (2 + \frac{7}{15}(.....) )  )  )  )  )  )  
+\end{equation*}
+
+Diese Formel läuft in quadratischer Zeit.~\cite{leibnizTime}
+
+
+\section{Genauigkeit}
+
+\subsection{Beschränkung der Eingabegröße}
+Um $n$ Hexadezimalen Nachkommastellen genau darzustellen, brauchen wir $4n$ binäre Stellen. Die Größe der Eingabe für die Anzahl der binären Nachkommastellen ist auf eine 64 Bit Zahl beschränkt, wodurch die Eingabegröße für die Genauigkeit die Länge des Ergebnisses limitiert.
+
+\subsection{Genauigkeit der Division}
+Die Genauigkeit der Newton-Raphson Division ist stark abhängig von der Anzahl an Iterationen die Ausgeführt werden.
+Jedoch ist es auch nicht sinnvoll mehr Rechenzeit als nötig in die Division zu investieren, wenn eine geringere Präzision erwartet wird.\\
+Der Initialisierungswert der Division lasst sich mithilfe der folgenden linearen Approximation-Funktion annähern~\cite{linear-approximation}:
+\begin{equation*}
+    X_0 = \frac{48}{17} - \frac{32}{17} \cdot N' \thickapprox \frac{1}{N'}
+\end{equation*}
+Daher haben wir die folgende Absolutwert-Fehlers Funktion:
+\begin{equation*}
+    \begin{split}
+        \lvert \epsilon \rvert & = \lvert 1 - N' \cdot \frac{1}{N'} \rvert \\
+        & = \lvert 1 - N' \cdot (\frac{48}{17} - \frac{32}{17} \cdot N') \rvert
+    \end{split}
+\end{equation*}
+Weil $N'$ nach der Normalisierung über das Intervall von 0,5 bis 1 liegt, beträgt die Funktion folgenden maximalen Absolut-Fehlerwert:
+\begin{equation*}
+    \lvert \epsilon \rvert \leq \frac{1}{17}
+\end{equation*}
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}
+    \begin{axis}[
+        xmin = 0.5, xmax = 1,
+        ymin = 0, ymax = 0.07,
+        xtick distance = 0.05,
+        ytick distance = 0.01,
+        grid = both,
+        minor tick num = 1,
+        major grid style = {lightgray},
+        minor grid style = {lightgray!25},
+        xlabel=N',
+        ylabel=Absolutwert des Fehler,
+        width = \textwidth,
+        height = 0.5*\textwidth]
+        \addplot[ smooth,thick, blue] file[]{Data/absolutfehler.dat};
+        \node[draw, mark=square*, red, thick] at (axis cs: 0.75, 0.05882352941176494){};
+        \node[draw, red] at (axis cs: 0.75, 0.065){(0.75, 1/17)};
+    \end{axis}
+    \end{tikzpicture}
+    \caption{Absolutwert-Fehler Funktion}
+\end{figure}
+
+Sei die anfängliche Annäherung $X_0$, können wir die nächste Näherung der Funktion mit der Newton-Raphson-Methode berechnen, 
+die sich wie folgt darstellt:
+\begin{equation*}
+    X_{n+1} = X_n \cdot (2 - N' \cdot X_n)
+\end{equation*}
+
+Da die Konvergenz der Newton-Raphson Division quadratisch ist, sich also der Fehler mit jeder Iteration quadriert reichen
+\begin{equation*}
+    \lceil\log\textsubscript{2}\frac{n + 1}{\log\textsubscript{2}17}\rceil
+\end{equation*}
+Iterationsschritte um eine Genauigkeit von n Bit sicherzustellen~\cite{Vestias2013}.
 
 
 \section{Performanzanalyse}
 
+\subsection{Test Umgebung}
+Getestet wurde auf einem System mit einem 11th Gen Intel® Core™ i7-1165G7 Prozessor, 2.80GHz x 8 Cores, 16Gb Arbeitsspeicher,
+Ubuntu 22.04.1 LTS, Linux Kernel 5.15.0-58-generic. Kompiliert wurde mit GCC 11.3.0 mit der Option -O3.
+
+\subsection{Die Performanzergebnisse}
+Hier werden die Hauptimplementation mit dem Bailey-Borwein-Plouffe Algorithmus verglichen. Getestet wurden mit verschiedener Anzahl von Hexadezimalen Nachkommastelle im Bereich von 1000 bis 500000. Für bessere Übersicht wurde dieser Eingabebereich aufgeteilt. \\
+Mit den Eingabegrößen von 1000 bis 100000 wurde die Berechnung von Pi jeweils 10 mal durchgeführt. 
+Bei diesen Eingabegrößen ist die Hauptimplementierung nicht schneller. Der Unterschied in der Berechnungszeit zwischen Haupt- und Vergleichsimplementierung bei kleinen 
+Eingaben ist ziemlich groß, nimmt aber mit steigender Eingabegröße ab. Erst bei der Berechnung von 100000 Nachkommastellen
+sind die Berechnungszeiten fast gleich. \\
+Bei den größeren Eingaben von 100000 bis 
+500000 wurden jeweils 3 mal die Zeit gemessen. Hier erweist sich die Hauptimplementierung als überlegen. 
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}
+    \begin{axis}[
+        xmin = 0, 
+        ymin = 0,
+        ymax = 600,
+        xmax = 100000,
+        grid = both,
+        xtick distance = 10000,
+        ytick distance = 100,
+        major grid style = {lightgray},
+        minor grid style = {lightgray!25},
+        xlabel=Nachkommastellen,
+        ylabel=Echte Laufzeit im s,
+        width = \textwidth,
+        height = 0.55\textwidth,
+        legend pos=north west]
+        \addplot[mark=square*, smooth, thick, blue] file[]{Data/v1_benchmark.dat};
+        \addlegendentry{Haupt Implementierung}
+        \addplot[mark=square*, smooth, thick, orange] file[]{Data/v2_benchmark.dat};
+        \addlegendentry{Vergleichs Implementierung}
+    \end{axis}
+    \end{tikzpicture}
+    \caption{Durchschnittliche Laufzeit bei zehn Wiederholungen auf Intel i7-1165G7}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}
+    \begin{axis}[
+        xmin = 100000, 
+        ymin = 500,
+        ymax = 16000,
+        xmax = 500000,
+        grid = both,
+        xtick distance = 50000,
+        ytick distance = 1000,
+        major grid style = {lightgray},
+        minor grid style = {lightgray!25},
+        xlabel=Nachkommastellen,
+        ylabel=Echte Laufzeit im s,
+        width = \textwidth,
+        height = 0.6\textwidth,
+        legend pos=north west]
+        \addplot[mark=square*, smooth, thick, blue] file[]{Data/v1_benchmark.dat};
+        \addlegendentry{Haupt Implementierung}
+        \addplot[mark=square*, smooth, thick, orange] file[]{Data/v2_benchmark.dat};
+        \addlegendentry{Vergleichs Implementierung}
+    \end{axis}
+    \end{tikzpicture}
+    \caption{Durchschnittliche Laufzeit bei drei Wiederholungen auf Intel i7-1165G7}
+\end{figure}
+
+
+
+Die Hauptimplementation braucht $24461.969053$ Sekunde, also $6.79492$ Stunde, um die erste 1 Milionen Nachkommastellen zu berechnen. 
 
 \section{Zusammenfassung und Ausblick}
+\subsection{Zusammenfassung}
+In dieser Projektarbeit war die Aufgabe Pi mit beliebiger Anzahl an Nachkommastellen zu berechnen. Dafür wurde eine Bignum-Struktur zur 32 Bit Basis mit entsprechender Arithmetik erstellt. Für die Multiplikation wurder der Karazuba-Algorithmus verwendet und für Division die Newton-Raphson Methode. Zur endgültigen Berechnung von Pi wurde Binary Splitting mit den Parametern gemäß der in der Aufgabe angegebenen Formel angewendet.
 
-% TODO: Fuegen Sie Ihre Quellen der Datei Ausarbeitung.bib hinzu
+Im Performanztest ergab sich, dass diese Implemntation bei einer kleineren Anzahl an Nachkommastellen eher langsamer ist, jedoch ab $10^5$ Hexadezimalstellen weniger Zeit benötigt.
+
+\subsection{Ausblick}
+\subsubsection{Verwendung von 64 Bit Basis}
+Eine Möglichkeit die Effizienz unserer Implementation zu verbessern, wäre die Struktur mit der Basis 64 anstelle von Basis 32 zu implementieren. Dadurch könnten mehr Daten auf einmal Verarbeitet werden, wodurch vor allem bei Addition, Subtraktion und Division Zeit gespart würde, da weniger Operationen erfordern wären. Hierfür müsste eine zusätzliche Behandlung der für die Multiplikation entwickelt werden, da die Multiplikation von zwei 64-Bit-Blöcken  ein 128-Bit-Ergebnis ergibt, das ohne Änderung zu einem Überlauf führt und falsche Ergebnisse liefert.
+
+\subsubsection{Verwendung von SIMD}
+Die Bit-Shift-Methode wird recht häufig aufgerufen, nicht nur bei der Berechnung, sondern auch bei der Umwandlung des Bingums von hexadezimaler in dezimale Form. Hierfür können SEE-Instruktionen für SIMD verwendet werden, um die Leistung zu optimieren. 
+
+Die Addition/Subtraktion bietet auch eine Möglichkeit SIMD anzuwenden. Hierbei könnten 4 Bignum Blöcke in einem 128 Bit Register auf einmal verarbeitet werden.
+Sowohl die Addition, als auch die Subtraktion von zwei Blöcken kann zu Überträgen führen, welche sich auf die nächsten Blöcken auswirken würden. Da jedoch SIMD hat keine Carry-Flags hat, müsste darauf geachtet werden den Übertrag zusätzlich zu berechnen.
+
+\newpage
+
+% done: Fuegen Sie Ihre Quellen der Datei Ausarbeitung.bib hinzu
 % Referenzieren Sie diese dann mit \cite{}.
 % Beispiel: CR2 ist ein Register der x86-Architektur~\cite{intel2017man}.
 \bibliographystyle{plain}

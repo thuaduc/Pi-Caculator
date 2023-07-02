@@ -3,9 +3,9 @@ LDFLAGS=-lm
 
 .PHONY: all clean
 
-all: test
-test: test.c operations.S 
+all: main
+main: main.c operations.S multiplication.c pi.c operations.c test.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 clean:
-	rm -f test
-
+	rm -f main
+	

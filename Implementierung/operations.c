@@ -6,15 +6,17 @@
 #include <string.h>
 #include "operations.h"
 
+#define MAX32_MASK 0x100000000
+
+/*
+ * Initializes the given bignum with the value n;
+ * allocates an additional 32 bit block for further operations
+ */
 void bignumInit(struct bignum *num, uint64_t n)
 {
     num->numbers = calloc(2, sizeof(uint32_t));
-    if (num->numbers == NULL)
-    {
-        fprintf(stderr, "Error while allocation memory!");
-        exit(EXIT_FAILURE);
-    }
-    num->numbers[0] = n % 0x100000000;
+    checkAllocationError(num->numbers);
+    num->numbers[0] = n % MAX32_MASK;
     num->length = 1;
     if (n > UINT32_MAX)
     {
@@ -22,14 +24,6 @@ void bignumInit(struct bignum *num, uint64_t n)
         num->length++;
     }
     num->subone = 0;
-}
-
-/*
- * Free bignum allocated memory
- */
-void bignumFree(struct bignum *num)
-{
-    free(num->numbers);
 }
 
 void checkAllocationError(uint32_t *numbers)
@@ -41,6 +35,129 @@ void checkAllocationError(uint32_t *numbers)
     }
 }
 
+/*
+ * Unsigned subtraction x = x - y
+ */
+int bignum_uSub(struct bignum *x, const struct bignum *y)
+{
+
+    long int offset;
+    offset = x->subone - y->subone;
+    // differenciate if minuend or subtrahend has a longer fractional part
+    bool minuend_sub_longer = offset >= 0;
+
+    if (!minuend_sub_longer)
+    {
+        // Make the array bigger -> length of x +
+        size_t nl = (x->length - offset);
+        uint32_t *more_numbers = malloc(nl * sizeof(uint32_t));
+        checkAllocationError(more_numbers);
+        memcpy(&more_numbers[-offset], &x->numbers[0], sizeof(uint32_t) * x->length);
+        free(x->numbers);
+        x->numbers = more_numbers;
+        x->length = nl;
+        x->subone -= offset;
+    }
+
+    bool carry = false;
+    size_t i = 0;
+
+    if (minuend_sub_longer == 0)
+    { // subtrahend has more decimals after point --> 0-y
+        (x->numbers)[0] = MAX32_MASK - (y->numbers)[0];
+        carry = 1;
+        for (i = 1; i < (long unsigned int)(-offset); i++)
+        {
+            (x->numbers)[i] = MAX32_MASK - (y->numbers)[i] - carry;
+        }
+        offset = 0;
+    }
+
+    while (i < y->length)
+    {
+        if ((x->numbers)[i + offset] >= (y->numbers)[i] + carry)
+        {
+            (x->numbers)[i + offset] = ((x->numbers)[i + offset] - (y->numbers)[i] - carry);
+            carry = 0;
+        }
+        else
+        {
+            (x->numbers)[i + offset] = MAX32_MASK + (x->numbers)[i + offset] - (y->numbers)[i] - carry;
+            carry = 1;
+        }
+        i++;
+    }
+
+    while (i < x->length && carry)
+    {
+        if ((x->numbers)[i] > 0)
+        {
+            (x->numbers)[i]--;
+            carry = 0;
+        }
+        else
+        {
+            (x->numbers)[i] = MAX32_MASK - 1;
+        }
+        i++;
+    }
+    if (carry)
+    {
+        // error subtraction should be unsigned
+        fprintf(stderr, "Subtraction should be unsigned.\n");
+        return EXIT_FAILURE;
+    }
+    if (!minuend_sub_longer)
+        x->subone = y->subone;
+
+    while (x->numbers[x->length - 1] == 0 && x->length > 1 && x->length >= x->subone)
+        x->length--;
+
+    return EXIT_SUCCESS;
+}
+
+/*
+ * Signed subtraction of two bignums. returns absolute value
+ */
+void bignum_signedSub(const struct bignum *x, const struct bignum *y, struct bignum *res)
+{
+    // x bigger
+    if (bignumCompare(x, y))
+    {
+        bignumCopy(x, res); // create copy of x for result
+        if (bignum_uSub(res, y))
+        {
+            printf("sub x - y:");
+            exit(EXIT_FAILURE);
+        }
+    }
+    else // y bigger
+    {
+        bignumCopy(y, res); // create copy of x for result
+        if (bignum_uSub(res, x))
+        {
+            printf("sub y - x:");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+/*
+ * Free bignum allocated memory
+ */
+void bignumFree(struct bignum *num)
+{
+    if (num == NULL)
+    {
+        fprintf(stderr, "Allocation already be freed or not exits.\n");
+        exit(EXIT_FAILURE);
+    }
+    free(num->numbers);
+}
+
+/*
+ *  Prints bignum, meant for debugging
+ */
 void bignumPrint(const struct bignum *num)
 {
     for (int i = num->length - 1; i >= 0; i--)
@@ -54,86 +171,6 @@ void bignumPrint(const struct bignum *num)
     printf("\n");
 }
 
-void bignumPreparation(const struct bignum *x, const struct bignum *y,
-                       struct bignum *a, struct bignum *b)
-{
-    size_t greater_integer = x->length - x->subone > y->length - y->subone ? x->length - x->subone : y->length - y->subone;
-    size_t greater_factional = x->subone > y->subone ? x->subone : y->subone;
-
-    a->length = greater_integer + greater_factional;
-    b->length = greater_integer + greater_factional;
-
-    a->subone = greater_factional;
-    b->subone = greater_factional;
-
-    a->numbers = calloc(a->length, sizeof(uint32_t));
-    b->numbers = calloc(b->length, sizeof(uint32_t));
-
-    if (x->subone > y->subone)
-    {
-        memcpy(&a->numbers[0], &x->numbers[0], x->subone * sizeof(uint32_t));
-        memcpy(&b->numbers[x->subone - y->subone], &y->numbers[0], y->subone * sizeof(uint32_t));
-    }
-    else if (y->subone > x->subone)
-    {
-        memcpy(&b->numbers[0], &y->numbers[0], y->subone * sizeof(uint32_t));
-        memcpy(&a->numbers[y->subone - x->subone], &x->numbers[0], x->subone * sizeof(uint32_t));
-    }
-    else
-    {
-        memcpy(&a->numbers[0], &x->numbers[0], x->subone * sizeof(uint32_t));
-        memcpy(&b->numbers[0], &y->numbers[0], y->subone * sizeof(uint32_t));
-    }
-
-    memcpy(&a->numbers[a->subone], &x->numbers[x->subone], greater_integer * sizeof(uint32_t));
-    memcpy(&b->numbers[b->subone], &y->numbers[y->subone], greater_integer * sizeof(uint32_t));
-}
-
-void bignumAddV1(const struct bignum *x, const struct bignum *y, struct bignum *res)
-{
-
-    struct bignum a, b;
-    bignumPreparation(x, y, &a, &b);
-
-    res->subone = a.subone;
-    res->length = a.length + 1;
-    res->numbers = calloc(res->length, sizeof(uint32_t));
-
-    uint64_t carry = 0;
-    for (int i = 0; i < (int)a.length; i++)
-    {
-        uint64_t sum = (uint64_t)a.numbers[i] + (uint64_t)b.numbers[i] + carry;
-        if (sum > UINT32_MAX)
-        {
-            res->numbers[i] = sum - UINT32_MAX - 1;
-            carry = 1;
-        }
-        else
-        {
-            res->numbers[i] = a.numbers[i] + b.numbers[i] + carry;
-            carry = 0;
-        }
-    }
-
-    if (carry)
-    {
-        res->numbers[res->length - 1] = 1;
-    }
-    else
-    {
-        realloc(&res->numbers[0], (res->length - 1) * sizeof(uint32_t));
-        if (res->numbers == NULL)
-        {
-            fprintf(stderr, "Error while reallocating memory!\n");
-            return EXIT_FAILURE;
-        }
-        res->length--;
-    }
-
-    bignumFree(&a);
-    bignumFree(&b);
-}
-
 /*
  * add two bignums and return the result
  */
@@ -142,89 +179,81 @@ void bignumAdd(const struct bignum *x, const struct bignum *y, struct bignum *re
     size_t greater_length = x->length > y->length ? x->length : y->length;
     size_t greater_subone = x->subone > y->subone ? x->subone : y->subone;
 
-    struct bignum res;
+    // allocate memory for result with the greater_length + one additional block for potential carry
+    result->numbers = calloc(greater_length + 1, sizeof(uint32_t));
+    checkAllocationError(result->numbers);
+    result->length = 0;
 
-    res.numbers = calloc(greater_length + 1, sizeof(uint32_t));
-    if (res.numbers == NULL)
-    {
-        fprintf(stderr, "Error while allocation memory!");
-        exit(EXIT_FAILURE);
-    }
-    res.length = 0;
-
+    // the result of addition will be stored in this variable, if there's an overflow, the rest will be saved in the highst 32 bits of sum
     uint64_t sum;
+
+    // indicates if the carry flag is set. 1-> true 0 -> false
     uint32_t carry = 0;
     size_t offset = 0;
     size_t x_index = 0;
     size_t y_index = 0;
 
+    // if x->subone has more sub one blocks than y->subone, then copy these blocks to the result using memcpy
     if (x->subone > y->subone)
     {
         size_t deff = x->subone - y->subone;
-        memcpy(&res.numbers[0], &x->numbers[0], deff * 4);
-        /*
-        for(int i =0 ; i < deff; i++){
-            res.numbers[i] = x->numbers[x_index++];
-        }
-        */
-        res.length += deff;
+        memcpy(&result->numbers[0], &x->numbers[0], deff * 4);
+        result->length += deff;
         x_index = deff;
     }
-    else if (x->subone < y->subone)
+    else if (x->subone < y->subone) // if y->subone has more sub one blocks than x->subone, then copy these blocks to the result using memcpy
     {
         size_t deff = y->subone - x->subone;
-        memcpy(&res.numbers[0], &y->numbers[0], deff * 4);
-        /*
-        for(int i =0 ; i < deff; i++){
-            res.numbers[i] = y->numbers[y_index++];
-        }
-        */
-        res.length += deff;
+        memcpy(&result->numbers[0], &y->numbers[0], deff * 4);
+        result->length += deff;
         y_index = deff;
     }
-
-    for (size_t i = 0; x_index < x->length && y_index < y->length; i++)
+    size_t i;
+    // The addition loop
+    for (i = 0; x_index < x->length || y_index < y->length; i++)
     {
+        // if x finished before y, then copy the rest of y in sum
         if (x_index >= x->length)
         {
             sum = ((uint64_t)y->numbers[y_index]) + carry;
             y_index++;
-        }
+        } // if y finished before x, then copy the rest of y in sum
         else if (y_index >= y->length)
         {
             sum = ((uint64_t)x->numbers[x_index]) + carry;
             x_index++;
         }
         else
-        {
+        { // add x + y + carry to sum
             sum = ((uint64_t)x->numbers[x_index] + (uint64_t)y->numbers[y_index]) + carry;
             x_index++;
             y_index++;
         }
+
         carry = sum > UINT32_MAX ? 1 : 0;
-        if (i == 0 && x_index == y_index && i < greater_subone && sum % 0x100000000 == 0)
+
+        //  If the sum of two sub one blocks is zero and the result block was the first in res, the value of the new block gets omitted
+        if (i - offset == 0 && i < greater_subone && sum % MAX32_MASK == 0)
         {
             offset++;
             continue;
         }
-        res.numbers[i - offset] = sum % 0x100000000;
-        res.length++;
+        result->numbers[i - offset] = sum % MAX32_MASK;
+        result->length++;
     }
 
     if (carry)
     {
-        res.numbers[res.length] = 1;
-        res.length++;
+        result->numbers[result->length] = 1;
+        result->length++;
     }
 
-    // The number of sub one blocks is equal to that of the addend with more sub one places minus the blocks that are omitted
-    res.subone = greater_subone - offset;
-
-    return res;
+    // removing the number of blocks ,ommited during the addition, from the total subone blocks
+    result->subone = greater_subone - offset;
 }
 
 /*
- * reduce the bignum size to desired precision in blocks
+ * Reduce the bignum size to desired precision in blocks
  */
 void reduceSize(struct bignum *num, size_t prec)
 {
@@ -243,157 +272,122 @@ void reduceSize(struct bignum *num, size_t prec)
 }
 
 /*
- * normalizes the given number to a number between [0.5,1] to be used in Newton-Raphson-formula, ommits unused subone blocks, stores the result in destenation
- * this methos can only be applied on integer numbers. if it's not the case, the program terminates.
+ * Check if bignum is integer
+ * return 1 if true, 0 if false
  */
-size_t normalize(const struct bignum *x, struct bignum *dest)
+int checkInteger(struct bignum *result)
 {
-    if (x->subone > 0)
+    if (result->subone == 0)
     {
-        fprintf(stderr, "DEBUG: this method accepts integer values only!\n");
-        exit(EXIT_FAILURE);
+        return 1;
     }
-
-    // convert all blocks to subone blocks, applying left shifts until the most significant subone bit is set to get a number between [0.5,1]
-    // n represents the number of left shifts
-    size_t n = 0;
-    size_t last_block = x->length;
-    if (x->length != 1 || x->numbers[0] != 0)
+    else
     {
-        while (x->numbers[last_block - 1] == 0 && last_block != 1)
+        for (size_t i = 0; i < result->subone; i++)
         {
-            last_block -= 1;
-        }
-        while ((x->numbers[last_block - 1] << n & 0x80000000) == 0)
-        {
-            n++;
-        }
-
-        dest->numbers = calloc(last_block, sizeof(uint32_t));
-        if (dest->numbers == NULL)
-        {
-            fprintf(stderr, "Error while allocation memory!");
-            exit(EXIT_FAILURE);
-        }
-
-        // overflow represents the bits lost by shifting left, overflow will be added to the next block to restore the value
-        uint32_t overflow = 0;
-
-        uint32_t val;
-
-        // Offset represents the number of unnecessary blocks to be removed
-        size_t offset = 0;
-
-        // if n=0 then no shifts required, so the blocks will be copied directly to the destenation
-        if (n == 0)
-        {
-            memcpy(&dest->numbers[0], &x->numbers[0], last_block);
-        }
-        else
-        {
-            for (size_t i = 0; i < last_block; i++)
+            if (result->numbers[i] != 0)
             {
-                uint32_t temp = x->numbers[i] >> (32 - n);
-                val = x->numbers[i] << n;
-                val += overflow;
-                overflow = temp;
-
-                // remove unnessesary blocks
-                if (val == 0 && i == offset)
-                {
-                    offset++;
-                }
-                else
-                {
-                    dest->numbers[i - offset] = val;
-                }
+                return 0;
             }
         }
-
-        dest->length = last_block - offset;
     }
-
-    // the total right shifts needed will be stored in n.
-    n = (last_block - x->subone) * 32 - n;
-    dest->subone = dest->length;
-    return n;
-}
-
-/**
- * @brief print bignum number Array with decimal seperator
- *
- * @param bignum
- */
-void printArr(struct bignum *num)
-{
-    printf("Array [");
-    for (size_t i = num->length - 1; i > 0; i--)
-    {
-        printf("%u ", num->numbers[i]);
-        if (num->subone == i)
-            printf(",");
-    }
-    printf("%u]\n", num->numbers[0]);
+    return 1;
 }
 
 /*
- * Print bignum number in decimal form
+ * Convert bignum number in decimal form
  */
-void bignumPrintDec(const struct bignum *x, size_t totalDigits)
+size_t bignumConvDec(const struct bignum *x, uint8_t **bufferRes)
 {
+    // result store fractional part of pi
     struct bignum result;
-    result.numbers = malloc(x->length * sizeof(uint32_t));
-    memcpy(result.numbers, x->numbers, x->length * sizeof(uint32_t));
-    result.length = x->length;
+    result.numbers = malloc((x->length - 1) * sizeof(uint32_t));
+    checkAllocationError(result.numbers);
+    result.length = x->length - 1;
     result.subone = x->subone;
-    size_t looptimes = totalDigits - 1;
 
-    while (looptimes > 0)
+    memcpy(result.numbers, x->numbers, result.length * sizeof(uint32_t));
+
+    // since convert algo only work with integer, multiply pi by ten till result is integer
+    while (checkInteger(&result) == 0)
     {
         struct bignum a;
         struct bignum b;
-        a = lShift(&result, 3);
-        b = lShift(&result, 1);
+        lShift(&result, 3, &a);
+        lShift(&result, 1, &b);
         bignumFree(&result);
-        result = bignumAdd(&a, &b);
+        bignumAdd(&a, &b, &result);
         bignumFree(&a);
         bignumFree(&b);
-        looptimes--;
     }
-
-    printf("result after times 10. %d\n", result.subone);
-    bignumPrint(&result);
 
     size_t len = result.length;
     size_t bufcounter = 0;
+    size_t bufferLength = 10 * result.length;
 
-    uint8_t *buffer = (uint8_t *)calloc(totalDigits, sizeof(uint8_t));
+    // buffer save result digits by digits
+    uint8_t *buffer = (uint8_t *)calloc(bufferLength, sizeof(uint8_t));
     uint32_t *num = (uint32_t *)calloc(len, sizeof(uint32_t));
     uint32_t *num2 = (uint32_t *)calloc(len, sizeof(uint32_t));
-    bignumCopy(&result, num);
+    if (buffer == NULL)
+    {
+        fprintf(stderr, "Error while re/allocating memory!\n");
+        exit(EXIT_FAILURE);
+    }
+    checkAllocationError(num);
+    checkAllocationError(num2);
+    memcpy(num, result.numbers, result.length * sizeof(uint32_t));
 
     while (1)
     {
+        // convert hex to dec by compute divide by ten method
         binaryConverter(buffer, num, num2, bufcounter++, len);
-        if (bufcounter == totalDigits)
+        if (bufcounter == bufferLength)
             break;
 
         binaryConverter(buffer, num2, num, bufcounter++, len);
-        if (bufcounter == totalDigits)
+        if (bufcounter == bufferLength)
             break;
     }
 
-    for (int i = totalDigits - 1; i >= 0; i--)
+    // find position where there is no leading 0
+    for (int i = (int)bufferLength - 1; i >= 0; i--)
+    {
+        if (buffer[i])
+        {
+            bufferLength = i;
+            break;
+        }
+    }
+
+    *bufferRes = buffer;
+    free(num);
+    free(num2);
+    bignumFree(&result);
+    return bufferLength;
+}
+
+/*
+ * Print bignum in decimal form
+ */
+void bignumPrintDec(const struct bignum *x, size_t totalDigits)
+{
+    uint8_t *buffer;
+    size_t bufferLength = bignumConvDec(x, &buffer);
+
+    printf("%" PRId32 ",", x->numbers[x->length - 1]);
+    for (size_t i = bufferLength; i > bufferLength - totalDigits; i--)
     {
         printf("%" PRIu8 "", buffer[i]);
     }
     printf("\n");
 
     free(buffer);
-    free(num);
-    free(num2);
 }
 
+/*
+ * Print bignum number in hexadecimal form
+ */
 void bignumPrintHex(const struct bignum *num, size_t totalDigits)
 {
     size_t all_blocks = totalDigits / 8;
@@ -411,7 +405,7 @@ void bignumPrintHex(const struct bignum *num, size_t totalDigits)
         // Printing the highest significant places without leading zeroes, if they are not subone
         if ((size_t)i == num->length - 1 && num->subone < num->length)
         {
-            printf("%x", num->numbers[num->length - 1]);
+            printf("%X", num->numbers[num->length - 1]);
         }
         else
         {
@@ -420,7 +414,7 @@ void bignumPrintHex(const struct bignum *num, size_t totalDigits)
                 printf(",");
                 comma_set = true;
             }
-            printf("%08x", num->numbers[i]);
+            printf("%08X", num->numbers[i]);
         }
     }
 
@@ -443,84 +437,82 @@ void rShift(const struct bignum *num, size_t n, struct bignum *res)
     size_t shifted_blocks = n / 32;
     size_t shifted_bits = n % 32;
 
-    struct bignum res;
-    res.length = num->length + 1;
-    res.subone = num->subone - shifted_blocks;
-    res.numbers = (uint32_t *)calloc(res.length, sizeof(uint32_t));
+    res->length = num->length + 1;
+    // shift block by increasing subone
+    res->subone = num->subone + shifted_blocks + 1;
+    res->numbers = (uint32_t *)calloc(res->length, sizeof(uint32_t));
+    checkAllocationError(res->numbers);
+    binaryShiftRight(res->numbers, num->numbers, num->length, shifted_bits);
 
-    binaryShiftRight(res.numbers, num->numbers, num->length, shifted_bits);
-
-    if (res.numbers[res.length - 1] == 0)
+    if (res->numbers[res->length - 1] == 0)
     {
-        realloc(res.numbers, (res.length - 1) * sizeof(uint32_t));
-        res.length--;
+        if (res->subone == res->length)
+        {
+            res->subone--;
+        }
+        res->length--;
+    }
+}
+
+/*
+ * Shift bignum n bits to the left and return result, method for newton raphson division
+ * work for n < 32
+ */
+void lShift(const struct bignum *num, size_t n, struct bignum *res)
+{
+    res->length = num->length + 1;
+    // shift block by decreasing subone
+    res->subone = num->subone;
+    res->numbers = (uint32_t *)calloc(res->length, sizeof(uint32_t));
+    checkAllocationError(res->numbers);
+    binaryShiftLeft(res->numbers, num->numbers, num->length, n);
+
+    if (res->numbers[res->length - 1] == 0)
+    {
+        res->length--;
+    }
+}
+
+/*
+ * Returns length of bignum without leading zeros
+ */
+size_t actualLength(const struct bignum *A)
+{
+    size_t res = A->length;
+    while ((res > 1) && (A->numbers[res - 1] == 0) && res > A->subone)
+    {
+        res--;
     }
     return res;
 }
 
 /*
- * Shift bignum n bits to the left and return result, method for newton raphson division
- */
-void lShift(const struct bignum *num, size_t n, struct bignum *res)
-{
-    size_t shifted_blocks = n / 32;
-    size_t shifted_bits = n % 32;
-
-    struct bignum res;
-    res.length = num->length + 1;
-    res.subone = num->subone + shifted_blocks;
-    res.numbers = (uint32_t *)calloc(res.length, sizeof(uint32_t));
-
-    binaryShiftLeft(res->numbers, num->numbers, num->length, shifted_bits);
-
-    if (res->numbers[res->length - 1] == 0)
-    {
-        realloc(res->numbers, (res->length - 1) * sizeof(uint32_t));
-        res->length--;
-    }
-}
-
-// test A greater B
-/**
- * @brief compares two bignums
- *
- * @param A
- * @param B
- * @return uint8_t
+ * Compares two bignums
  * 1 (true) if A > B
  * 0 (false) if A < B
  * 2 if equal
- *
  */
 uint8_t bignumCompare(const struct bignum *A, const struct bignum *B)
 {
-    size_t wh_la = A->length - A->subone;
-    size_t wh_lb = B->length - B->subone;
-    if (wh_la > wh_lb)
+    size_t A_len = actualLength(A);
+    size_t B_len = actualLength(B);
+    if (A_len - A->subone > B_len - B->subone)
     {
         return true;
     }
-    else if (wh_la < wh_lb)
+    else if (A_len - A->subone < B_len - B->subone)
         return false;
     else
     {
-        for (size_t i = 1; i <= min(A->length, B->length); i++)
+        for (size_t i = 1; i <= min(A_len, B_len); i++)
         {
-            if (A->numbers[A->length - i] > B->numbers[B->length - i])
+            if (A->numbers[A_len - i] > B->numbers[B_len - i])
                 return true;
-            else if (A->numbers[A->length - i] < B->numbers[B->length - i])
+            else if (A->numbers[A_len - i] < B->numbers[B_len - i])
                 return false;
         }
         return 2; // if equal
     }
-}
-
-/*
- * return the bigger uint32
- */
-uint32_t max(uint32_t a, uint32_t b)
-{
-    return a > b ? a : b;
 }
 
 /*
@@ -531,14 +523,55 @@ uint32_t min(uint32_t a, uint32_t b)
     return a < b ? a : b;
 }
 
-void bignumcopy(struct bignum *src, struct bignum *res)
+/*
+ * Creates a copy of a bignum
+ */
+void bignumCopy(const struct bignum *src, struct bignum *res)
 {
     res->length = src->length;
     res->subone = src->subone;
-    res->numbers = malloc(res->length * sizeof(uint32_t));
-    memcpy(&res->numbers[0], &src->numbers[0], res->length * sizeof(uint32_t));
+    uint32_t *newNumbers = (uint32_t *)malloc(res->length * sizeof(uint32_t));
+    checkAllocationError(newNumbers);
+    memcpy(&newNumbers[0], &(src->numbers[0]), res->length * sizeof(uint32_t));
+
+    // first saved in newNumbers Variable, to avoid memory problems
+    res->numbers = newNumbers;
 }
 
+/*
+ * Reduce bignum to range 0.5 - 1
+ * Return number of bit needed to shift
+ */
+int reduceToOne(const struct bignum *src, struct bignum *res)
+{
+    int count = 0;
+    for (int i = (int)src->length - 1; i >= 0; i--)
+    {
+        if (src->numbers[i] == 0)
+        {
+            continue;
+        }
+        else
+        {
+            uint32_t k = src->numbers[i];
+            while (k != 0)
+            {
+                k = k >> 1;
+                count++;
+            }
+            rShift(src, count, res);
+            res->subone += i;
+            count += i * 32;
+            break;
+        }
+    }
+    return count;
+}
+
+/*
+ * Newton Division method
+ * Compute T/M and return result
+ */
 struct bignum newtonDiv(const struct bignum *T, const struct bignum *M, size_t prec)
 {
     // Number of considered blocks needed to assure the required precision
@@ -552,16 +585,11 @@ struct bignum newtonDiv(const struct bignum *T, const struct bignum *M, size_t p
     struct bignum T_reduced;
     struct bignum M_reduced;
 
-    size_t n = normalize(M, &M_reduced);
+    size_t n = (size_t)reduceToOne(M, &M_reduced);
     rShift(T, n, &T_reduced);
 
     reduceSize(&T_reduced, cons_blocks * 2);
     reduceSize(&M_reduced, cons_blocks * 2);
-
-    printf("T reduced: ");
-    bignumPrint(&T_reduced);
-    printf("M reduced: ");
-    bignumPrint(&M_reduced);
 
     // magic0 is an aproximation for 48/17, magic1 for 32/17
     struct bignum magic0;
@@ -575,11 +603,8 @@ struct bignum newtonDiv(const struct bignum *T, const struct bignum *M, size_t p
     magic0.numbers = calloc(magic0.length, sizeof(uint32_t));
     magic1.numbers = calloc(magic1.length, sizeof(uint32_t));
 
-    if (magic0.numbers == NULL || magic1.numbers == NULL)
-    {
-        fprintf(stderr, "Error while allocation memory!");
-        exit(EXIT_FAILURE);
-    }
+    checkAllocationError(magic0.numbers);
+    checkAllocationError(magic1.numbers);
 
     // Fills the magic up to the same precision as D_reduced
     for (size_t i = 0; i < magic0.length - 1; i++)
@@ -594,13 +619,10 @@ struct bignum newtonDiv(const struct bignum *T, const struct bignum *M, size_t p
     struct bignum x;
 
     // Initial value for x wich is an aproximation of 48/17 - 32/17 * D_reduced
-    x = karazubaMult(&M_reduced, &magic1);
-    //
-    // reduceSize(&x, cons_blocks * 2);
-    //
+    karazMult(&M_reduced, &magic1, &x);
     bignumFree(&magic1);
 
-    bignumSubV1(&magic0, &x, &magic1);
+    bignum_signedSub(&magic0, &x, &magic1);
     bignumFree(&x);
     bignumFree(&magic0);
 
@@ -608,59 +630,172 @@ struct bignum newtonDiv(const struct bignum *T, const struct bignum *M, size_t p
 
     // Required steps to achieve the required precision
     int steps = ceil(log((prec + 1) / (log(17) / log(2))) / log(2));
-    printf("steps: %d\n", steps);
 
     struct bignum two;
     bignumInit(&two, 2);
 
-    // x = x * (2 - x * D_reduced)
     for (int i = 0; i < steps; i++)
     {
-        printf("x: ");
-        bignumPrint(&x);
         struct bignum temp0;
-        temp0 = karazubaMult(&M_reduced, &x);
-        //
-        reduceSize(&temp0, cons_blocks * 2);
-        //
-
-        printf("x * m_reduce: ");
-        bignumPrint(&temp0);
+        karazMult(&M_reduced, &x, &temp0);
+        reduceSize(&temp0, cons_blocks);
 
         struct bignum temp1;
-        bignumSubV1(&two, &temp0, &temp1);
-
-        printf("\n");
-        printf("2 - x * m_reduce: ");
-        bignumPrint(&temp1);
+        bignum_signedSub(&two, &temp0, &temp1);
         bignumFree(&temp0);
 
-        temp0 = karazubaMult(&x, &temp1);
-        //
-        reduceSize(&temp0, cons_blocks * 2);
-        //
+        karazMult(&x, &temp1, &temp0);
+        reduceSize(&temp0, cons_blocks);
 
         bignumFree(&temp1);
         bignumFree(&x);
 
         x = temp0;
-
-        /* printf("x: ");
-        bignumPrint(&x);*/
-
-        printf("----------------------------------\n");
     }
     bignumFree(&two);
 
-    // The actual quotient is then computed with N * x
-    printf("x last mul: ");
-    bignumPrint(&x);
-    printf("T_reduced: ");
-    bignumPrint(&T_reduced);
-    struct bignum res = karazubaMult(&T_reduced, &x);
-    // bignumPrint( &res );
+    struct bignum res;
+    karazMult(&T_reduced, &x, &res);
+    reduceSize(&res, cons_blocks);
     bignumFree(&x);
     bignumFree(&T_reduced);
     bignumFree(&M_reduced);
     return res;
+}
+
+/*
+ * This functions applays the Bailey–Borwein–Plouffe BBF formula by calculating 4S(1,n)−2S(4,n)−S(5,n)−S(6,n)
+ * Source: https://www.experimentalmath.info/bbp-codes/bbp-alg.pdf 
+ */
+void apply(int id, int last_itr, int rest)
+{
+    double pid, s1, s2, s3, s4;
+    char chx[16];
+
+    /*  id is the digit position.  Digits generated follow immediately
+    after id. */
+
+    s1 = sum(1, id);
+    s2 = sum(4, id);
+    s3 = sum(5, id);
+    s4 = sum(6, id);
+    pid = 4. * s1 - 2. * s2 - s3 - s4;
+    pid = pid - (int)pid + 1.;
+    tohex(pid, 16, chx);
+    if (last_itr)
+    {
+        if (rest)
+        {
+            printf("%1.1s", chx);
+        }
+        else
+        {
+            printf("%5.5s", chx);
+        }
+    }
+}
+
+/*  
+ * This returns, in chx, the first nhx hex digits of the fraction of x. 
+ */
+void tohex(double x, int nhx, char chx[])
+{
+    int i;
+    double y;
+    char hx[] = "0123456789ABCDEF";
+
+    y = fabs(x);
+
+    for (i = 0; i < nhx; i++)
+    {
+        y = 16. * (y - floor(y));
+        chx[i] = hx[(int)y];
+    }
+}
+
+/*  
+ * This routine evaluates the series  sum_k 16^(id-k)/(8*k+m)
+ * using the modular exponentiation technique. 
+ */
+double sum(int m, int id)
+{
+    int k;
+    double ak, p, s, t;
+    double eps = 1e-17;
+    s = 0.;
+
+    /*  Sum the series up to id. */
+    for (k = 0; k < id; k++)
+    {
+        ak = 8 * k + m;
+        p = id - k;
+        t = power(p, ak);
+        s = s + t / ak;
+        s = s - (int)s;
+    }
+
+    /*  Compute a few terms where k >= id. */
+    for (k = id; k <= id + 100; k++)
+    {
+        ak = 8 * k + m;
+        t = pow(16., (double)(id - k)) / ak;
+        if (t < eps)
+            break;
+        s = s + t;
+        s = s - (int)s;
+    }
+    return s;
+}
+
+/*  
+ * power = 16^p mod ak.  This routine uses the left-to-right binary
+ * exponentiation scheme. 
+ */
+double power(double p, double ak)
+{
+    int i, j;
+    double p1, pt, r;
+    static double tp[25];
+    static int tp1 = 0;
+
+    // If this is the first call to power, fill the power of two table tp.
+    if (tp1 == 0)
+    {
+        tp1 = 1;
+        tp[0] = 1.;
+
+        for (i = 1; i < 25; i++)
+            tp[i] = 2. * tp[i - 1];
+    }
+
+    if (ak == 1.)
+        return 0.;
+
+    //  Find the greatest power of two less than or equal to p.
+    for (i = 0; i < 25; i++)
+        if (tp[i] > p)
+            break;
+
+    pt = tp[i - 1];
+    p1 = p;
+    r = 1.;
+
+    // Perform binary exponentiation algorithm modulo ak.
+    for (j = 1; j <= i; j++)
+    {
+        if (p1 >= pt)
+        {
+            r = 16. * r;
+            r = r - (int)(r / ak) * ak;
+            p1 = p1 - pt;
+        }
+        pt = 0.5 * pt;
+        if (pt >= 1.)
+        {
+            r = r * r;
+            r = r - (int)(r / ak) * ak;
+        }
+    }
+
+    return r;
 }
