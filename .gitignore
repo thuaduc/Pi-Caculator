@@ -1,0 +1,6 @@
+/.idea
+/.vscode
+*.json
+.prettierignore
+.bash_history
+multiply.c
